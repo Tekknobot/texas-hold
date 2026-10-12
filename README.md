@@ -19,10 +19,16 @@ Click the table buttons to choose FOLD / CHECK / CALL / RAISE. Select MIN, HALF 
 
 Blinds start at $25 / $50 and rise every six hands. Starting stacks are $1600. Poker is strictly single-player and offline, suitable for a browser export; there is no gambling with real money.
 
+## Animated hand settlement
+
+After every hand, the match sidebar counts out the pot. TABLE RUN victories additionally count up the hand multiplier, active scoring perks, winning streak and points banked in sequence. Enter/Space or SKIP COUNT completes the reveal without advancing to the next hand; use Next Hand / Choose Upgrade to continue. Upgrade choices animate in with a staggered reveal. See `COUNT_SEQUENCE_NOTES.md` for timing adjustments.
+
+Table labels and result banners have been moved out of the card and animation paths, keeping the table area unobstructed.
+
 ## Winning five-card reveal
 
 At showdown, the exact five cards that form the winning poker hand rise with a gold outline; unused cards dim. The sidebar repeats those five face-up. In a split pot, use SHOW HOUSE / SHOW YOU to inspect either side's best combination. No winning-five claim is shown on a fold.
 
 ## Files
 
-Open `project.godot` in Godot 4.6 and press F5. The main logic is in `scripts/main.gd`; visual draft, run-complete and result overlays are in `scripts/screen_overlay.gd`. All original card art, backs, shaders and audio are preserved.
+Open `project.godot` in Godot 4.6 and press F5. The main logic is in `scripts/main.gd`; visual draft and run-complete overlays are in `scripts/screen_overlay.gd`. All original card art, backs, shaders and audio are preserved.

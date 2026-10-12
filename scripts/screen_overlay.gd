@@ -8,8 +8,16 @@ const GOLD := Color("e8bf7e")
 const WHITE := Color("f7f0d9")
 const MUTED := Color("a7bbb1")
 var game: Node2D
+var entrance_time := 0.0
+var previous_screen := ""
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+    if game != null:
+        if game.screen != previous_screen:
+            previous_screen = game.screen
+            entrance_time = 0.0
+        else:
+            entrance_time += delta
     queue_redraw()
 
 func _write(s: String, at: Vector2, size: int, c: Color, center: bool = false, heading: bool = false) -> void:
@@ -31,35 +39,10 @@ func _draw() -> void:
         return
     if game.show_help:
         _draw_help()
-    elif game.screen == "result":
-        _draw_result()
     elif game.screen == "draft":
         _draw_draft()
     elif game.screen == "run_end":
         _draw_run_end()
-
-func _draw_result() -> void:
-    var title: String = game.result_title
-    var c: Color = MINT if title == "YOU WIN" else (GOLD if title == "SPLIT POT" else ROSE)
-    # A compact status area below the cards. In run mode the score is shown
-    # separately from chip winnings, so the real poker result stays legible.
-    if game.run_mode:
-        var frame := Rect2(89, 681, 338, 167)
-        _panel(frame, Color(c.r, c.g, c.b, 0.65))
-        draw_rect(Rect2(101, 695, 4, 138), c)
-        _write(title, Vector2(120, 713), 21, c, false, true)
-        _write(game.result_subtitle, Vector2(120, 738), 14, WHITE)
-        var gain_color: Color = GOLD if game.run_last_points > 0 else MUTED
-        _write("+%d POINTS" % game.run_last_points, Vector2(120, 772), 26, gain_color, false, true)
-        _write("SCORE MULTIPLIER  %.2fX" % game.run_last_factor if game.run_last_points > 0 else "NO POINTS THIS HAND", Vector2(120, 799), 12, WHITE)
-        _write("TOTAL %d   /   STAGE TARGET %d" % [game.run_score, game.run_current_target()], Vector2(120, 829), 12, MUTED)
-    else:
-        var frame := Rect2(89, 717, 316, 108)
-        _panel(frame, Color(c.r, c.g, c.b, 0.65))
-        draw_rect(Rect2(102, 729, 4, 84), c)
-        _write(title, Vector2(120, 750), 19, c, false, true)
-        _write(game.result_subtitle, Vector2(120, 776), 15, WHITE)
-        _write(game.result_detail, Vector2(120, 804), 11, MUTED)
 
 func _draw_draft() -> void:
     draw_rect(Rect2(0, 0, 1440, 900), Color(Color("102320"), 0.88), true)
@@ -70,7 +53,12 @@ func _draw_draft() -> void:
     for i in range(game.run_choices.size()):
         var perk: Dictionary = game.run_choices[i]
         var card := Rect2(189 + i * 350, 321, 322, 256)
-        var hovered: bool = card.has_point(game.mouse_at)
+        var entrance: float = clampf((entrance_time - float(i) * 0.14) / 0.39, 0.0, 1.0)
+        var ease: float = 1.0 - pow(1.0 - entrance, 3.0)
+        # Slide each perk upward one at a time. All positions settle to their
+        # exact clickable rectangles. The cards are never poker-card nodes.
+        draw_set_transform(Vector2(0, 44.0 * (1.0 - ease)), 0.0, Vector2.ONE)
+        var hovered: bool = card.has_point(game.mouse_at) and entrance >= 1.0
         var style := StyleBoxFlat.new()
         style.bg_color = Color("315448") if hovered else Color("223e35")
         style.border_color = GOLD if hovered else Color("607b66")
@@ -83,6 +71,7 @@ func _draw_draft() -> void:
         _write(perk["value"], card.position + Vector2(20, 157), 40, GOLD, false, true)
         _write(perk["detail"], card.position + Vector2(20, 201), 13, WHITE)
         _write(perk["effect"], card.position + Vector2(20, 228), 12, MUTED)
+        draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
     _write("EVERY UPGRADE STACKS.  SCORING ONLY - POKER ODDS STAY FAIR.", Vector2(720, 619), 16, WHITE, true)
     _write("CLICK A CARD OR PRESS 1, 2 OR 3", Vector2(720, 661), 15, GOLD, true)
 
