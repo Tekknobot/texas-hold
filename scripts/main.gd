@@ -1158,12 +1158,9 @@ func _draw_community() -> void:
 		if i >= board.size():
 			_text("%02d" % (i + 1), Vector2(COMMUNITY_X[i], 467), 19, Color(Color("c3dbcb"), 0.23), 1)
 	_draw_pot()
-	if screen == "result" and showdown_focus >= 0:
-		var marker := "WINNING FIVE" if not showdown_is_split else ("YOUR BEST FIVE" if showdown_focus == 0 else "HOUSE BEST FIVE")
-		_rounded(Rect2(348, 541, 195, 30), Color("19372f"), Color(GOLD.r, GOLD.g, GOLD.b, 0.65), 8)
-		_text(marker, Vector2(445, 562), 13, GOLD, 1, true)
-	# Game callouts are now carried by THE ACTION in the right panel.
-	# Center-table text would otherwise be hidden behind the player's cards.
+	# No showdown banners on the felt. Winner cards lift upward as they glow;
+	# the gap between board and hole cards is intentionally reserved for art.
+	# The winning-five title and all five miniature cards are in the sidebar.
 
 func _draw_pot() -> void:
 	# Keep the chip stack and pot amount to the RIGHT of the house cards.
@@ -1265,13 +1262,15 @@ func _draw_footer() -> void:
 	_text("MOUSE   /   F FOLD   /   C CALL   /   R RAISE", Vector2(35, 866), 13, MUTED)
 
 func _draw_count_panel() -> void:
-	# Painted LAST into the isolated sidebar, z-safe from all card sprites.
-	var r := Rect2(895, 486, 496, 265)
+	# Keep the animated tally ABOVE the winning-five preview (y=694..741).
+	# Nothing may cover that preview, even while chips and multipliers count up.
+	var r := Rect2(895, 485, 496, 197)
 	_rounded(r, Color("162f29"), Color(GOLD.r, GOLD.g, GOLD.b, 0.75), 13)
-	_rect(Rect2(909, 503, 4, 38), GOLD)
-	_text("PAYOUT TALLY" if not run_mode else "TABLE RUN  /  SCORE TALLY", Vector2(929, 519), 13, MINT, 0, true)
+	_rect(Rect2(909, 498, 4, 36), GOLD)
+	_text("PAYOUT TALLY" if not run_mode else "TABLE RUN  /  SCORE TALLY", Vector2(929, 507), 13, MINT, 0, true)
+	_button("skip_count", Rect2(1228, 494, 136, 32), "SKIP COUNT", GOLD, false, true, 12)
 	var winner_label := "YOU WIN" if count_winner == 0 else ("HOUSE WINS" if count_winner == 1 else "SPLIT POT")
-	_text(winner_label, Vector2(927, 544), 23, GOLD if count_winner == 0 else (ROSE if count_winner == 1 else MINT), 0, true)
+	_text(winner_label, Vector2(927, 535), 21, GOLD if count_winner == 0 else (ROSE if count_winner == 1 else MINT), 0, true)
 	var phase_label := "POT COLLECTED"
 	var multiplier_label := "CHIPS"
 	if run_mode and count_winner == 0:
@@ -1297,32 +1296,28 @@ func _draw_count_panel() -> void:
 	else:
 		phase_label = "COUNTING THE POT" if count_phase == 0 else ("POT AWARDED" if count_winner == 0 else ("HOUSE COLLECTS" if count_winner == 1 else "CHIPS DIVIDED"))
 		multiplier_label = "CHIPS ON THE FELT"
-	_text(phase_label, Vector2(918, 570), 12, MUTED, 0, true)
+	_text(phase_label, Vector2(918, 552), 12, MUTED, 0, true)
 	var number := _count_value()
 	var pulse: float = 1.0 + count_flash * 0.04
 	var large_color := GOLD.lerp(PALE, count_flash * 0.65)
-	# A tiny ease-out pulse with an amber shadow; the font remains readable.
 	var tally_value := "+%d" % number if run_mode and count_winner == 0 and count_phase == 4 else "%d" % number
-	_text(tally_value, Vector2(920 + (1.0 - pulse) * 5.0, 623), 47 + int(round(count_flash * 4.0)), large_color, 0, true)
-	_text(multiplier_label, Vector2(1368, 613), 15, MINT, 2, true)
+	_text(tally_value, Vector2(920 + (1.0 - pulse) * 5.0, 606), 40 + int(round(count_flash * 3.0)), large_color, 0, true)
+	_text(multiplier_label, Vector2(1368, 599), 14, MINT, 2, true)
 	var stages: Array = ["POT", "HAND", "UPGRADE", "STREAK", "POINTS"] if run_mode and count_winner == 0 else ["POT", "SETTLE"]
-	# Each phase also has its own traveling progress strip.
-	_rect(Rect2(916, 633, 445.0 * _count_progress(), 2), Color(GOLD.r, GOLD.g, GOLD.b, 0.56))
+	_rect(Rect2(916, 615, 445.0 * _count_progress(), 2), Color(GOLD.r, GOLD.g, GOLD.b, 0.56))
 	var slots := stages.size()
 	for i in range(slots):
 		var width: float = 444.0 / float(slots)
 		var x: float = 916.0 + float(i) * width
-		var mark := Rect2(x, 641.0, width - 5.0, 7.0)
+		var mark := Rect2(x, 623.0, width - 5.0, 7.0)
 		_rect(mark, GOLD if count_phase == i else (MINT if count_phase > i else Color("39544a")))
-		_text(stages[i], Vector2(x + (width - 5.0) * 0.5, 670), 10, PALE if count_phase == i else MUTED, 1, count_phase == i)
+		_text(stages[i], Vector2(x + (width - 5.0) * 0.5, 647), 10, PALE if count_phase == i else MUTED, 1, count_phase == i)
 	var note := "UPGRADES AFFECT POINTS, NOT POKER CHIPS" if run_mode else "CHIPS RETURNED TO THE WINNING STACK"
 	if run_mode and count_winner == 0 and count_phase == 2:
 		note = "NO UPGRADES TRIGGERED" if run_last_triggered.is_empty() else "ACTIVE: " + run_last_triggered[0]
 		if run_last_triggered.size() > 1:
 			note += "  +%d MORE" % (run_last_triggered.size() - 1)
-	_text(note, Vector2(917, 694), 11, MUTED)
-	_button("skip_count", Rect2(1185, 708, 179, 33), "SKIP COUNT", GOLD, false, true, 13)
-	_text("ENTER TO SKIP", Vector2(914, 731), 11, MUTED)
+	_text(note, Vector2(917, 672), 11, MUTED)
 
 func _draw_showdown_cards() -> void:
 	# A miniature proof of the exact winning combination on the sidebar.
