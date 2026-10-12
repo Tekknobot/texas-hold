@@ -33,17 +33,81 @@ func _draw() -> void:
         _draw_help()
     elif game.screen == "result":
         _draw_result()
+    elif game.screen == "draft":
+        _draw_draft()
+    elif game.screen == "run_end":
+        _draw_run_end()
 
 func _draw_result() -> void:
     var title: String = game.result_title
     var c: Color = MINT if title == "YOU WIN" else (GOLD if title == "SPLIT POT" else ROSE)
-    # Lower-left status never covers the five shared cards or the player's hand.
-    var frame := Rect2(89, 717, 316, 108)
-    _panel(frame, Color(c.r, c.g, c.b, 0.65))
-    draw_rect(Rect2(102, 729, 4, 84), c)
-    _write(title, Vector2(120, 750), 19, c, false, true)
-    _write(game.result_subtitle, Vector2(120, 776), 15, WHITE)
-    _write(game.result_detail, Vector2(120, 804), 11, MUTED)
+    # A compact status area below the cards. In run mode the score is shown
+    # separately from chip winnings, so the real poker result stays legible.
+    if game.run_mode:
+        var frame := Rect2(89, 681, 338, 167)
+        _panel(frame, Color(c.r, c.g, c.b, 0.65))
+        draw_rect(Rect2(101, 695, 4, 138), c)
+        _write(title, Vector2(120, 713), 21, c, false, true)
+        _write(game.result_subtitle, Vector2(120, 738), 14, WHITE)
+        var gain_color: Color = GOLD if game.run_last_points > 0 else MUTED
+        _write("+%d POINTS" % game.run_last_points, Vector2(120, 772), 26, gain_color, false, true)
+        _write("SCORE MULTIPLIER  %.2fX" % game.run_last_factor if game.run_last_points > 0 else "NO POINTS THIS HAND", Vector2(120, 799), 12, WHITE)
+        _write("TOTAL %d   /   STAGE TARGET %d" % [game.run_score, game.run_current_target()], Vector2(120, 829), 12, MUTED)
+    else:
+        var frame := Rect2(89, 717, 316, 108)
+        _panel(frame, Color(c.r, c.g, c.b, 0.65))
+        draw_rect(Rect2(102, 729, 4, 84), c)
+        _write(title, Vector2(120, 750), 19, c, false, true)
+        _write(game.result_subtitle, Vector2(120, 776), 15, WHITE)
+        _write(game.result_detail, Vector2(120, 804), 11, MUTED)
+
+func _draw_draft() -> void:
+    draw_rect(Rect2(0, 0, 1440, 900), Color(Color("102320"), 0.88), true)
+    _panel(Rect2(144, 184, 1154, 523), Color(GOLD.r, GOLD.g, GOLD.b, 0.65))
+    draw_rect(Rect2(171, 220, 1100, 1), Color(GOLD.r, GOLD.g, GOLD.b, 0.26), true)
+    _write("TABLE RUN  /  CHOOSE ONE", Vector2(720, 246), 16, MINT, true, true)
+    _write("MAKE YOUR NEXT HAND COUNT", Vector2(720, 298), 31, WHITE, true, true)
+    for i in range(game.run_choices.size()):
+        var perk: Dictionary = game.run_choices[i]
+        var card := Rect2(189 + i * 350, 321, 322, 256)
+        var hovered: bool = card.has_point(game.mouse_at)
+        var style := StyleBoxFlat.new()
+        style.bg_color = Color("315448") if hovered else Color("223e35")
+        style.border_color = GOLD if hovered else Color("607b66")
+        style.set_corner_radius_all(12)
+        style.set_border_width_all(2 if hovered else 1)
+        draw_style_box(style, card)
+        draw_rect(Rect2(card.position.x + 17, card.position.y + 19, 4, 39), GOLD if hovered else MINT)
+        _write("0%d  /  UPGRADE" % (i + 1), card.position + Vector2(34, 45), 13, MINT, false, true)
+        _write(perk["name"], card.position + Vector2(20, 101), 24, WHITE, false, true)
+        _write(perk["value"], card.position + Vector2(20, 157), 40, GOLD, false, true)
+        _write(perk["detail"], card.position + Vector2(20, 201), 13, WHITE)
+        _write(perk["effect"], card.position + Vector2(20, 228), 12, MUTED)
+    _write("EVERY UPGRADE STACKS.  SCORING ONLY - POKER ODDS STAY FAIR.", Vector2(720, 619), 16, WHITE, true)
+    _write("CLICK A CARD OR PRESS 1, 2 OR 3", Vector2(720, 661), 15, GOLD, true)
+
+func _draw_run_end() -> void:
+    draw_rect(Rect2(0, 0, 1440, 900), Color(Color("102320"), 0.92), true)
+    _panel(Rect2(280, 208, 880, 508), Color(GOLD.r, GOLD.g, GOLD.b, 0.64))
+    var complete: bool = game.run_finished_text == "RUN COMPLETE"
+    var tone: Color = GOLD if complete else ROSE
+    _write("TEXAS HOLD 'EM  /  TABLE RUN", Vector2(720, 281), 18, MINT, true, true)
+    _write(game.run_finished_text, Vector2(720, 356), 48, tone, true, true)
+    _write(game.result_subtitle, Vector2(720, 397), 18, WHITE, true)
+    _write("FINAL SCORE", Vector2(720, 458), 15, MUTED, true)
+    _write("%d" % game.run_score, Vector2(720, 515), 50, GOLD, true, true)
+    _write("PERSONAL BEST  %d    /    HANDS PLAYED  %d" % [game.run_best_score, game.hand_number], Vector2(720, 548), 15, MUTED, true)
+    for i in range(2):
+        var r := Rect2(376 + i * 364, 588, 324, 60)
+        var hover: bool = r.has_point(game.mouse_at)
+        var box := StyleBoxFlat.new()
+        box.set_corner_radius_all(10)
+        box.bg_color = Color("80cfb5") if i == 0 and hover else (MINT if i == 0 else (Color("426252") if hover else Color("294a40")))
+        box.border_color = Color(GOLD.r, GOLD.g, GOLD.b, 0.46)
+        box.set_border_width_all(1)
+        draw_style_box(box, r)
+        _write("NEW TABLE RUN" if i == 0 else "CLASSIC TABLE", r.position + Vector2(162, 39), 21, Color("0b211e") if i == 0 else WHITE, true, true)
+    _write("NO REAL MONEY  /  EVERY NEW RUN STARTS FRESH", Vector2(720, 688), 13, MUTED, true)
 
 func _draw_help() -> void:
     draw_rect(Rect2(0, 0, 1440, 900), Color(Color("102320"), 0.94), true)
@@ -58,7 +122,8 @@ func _draw_help() -> void:
         "BUILD THE BEST FIVE-CARD HAND FROM ANY SEVEN.",
         "CHECK, CALL, RAISE OR FOLD ON YOUR TURN.",
         "THE BEST HAND WINS THE POT AT SHOWDOWN.",
-        "BLINDS INCREASE EVERY SIX HANDS."
+        "BLINDS INCREASE EVERY SIX HANDS.",
+        "TABLE RUN: NINE HANDS, SCORE TARGETS AND SCORING UPGRADES."
     ]
     for i in range(rules.size()):
         _write(rules[i], Vector2(365, 300 + i * 39), 17, WHITE)

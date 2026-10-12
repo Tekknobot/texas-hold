@@ -1,14 +1,28 @@
 # Texas HOLD 'EM
 
-A traditional, mouse-first, single-player Texas Hold 'Em table. Godot 4.6, suitable for desktop and browser export.
+A traditional, mouse-first, single-player Texas Hold'em game for Godot 4.6, with an optional roguelike-inspired TABLE RUN scoring mode. Built using the supplied card PNGs and the original Carrom-collection presentation: green felt, walnut/brass trim, cream typography, crisp panels, card flips, chips, sound, and celebratory particles.
 
-## Visual direction
-Uses the Carrom collection language: dark forest-green grid, clean cream lettering, muted mint/gold, walnut and brass game furniture and understated rounded score panels. Uses the original 52 card-face PNGs, five interchangeable backs, animated 3D-like flips, dealing tweens, chip particles and sounds.
+## Choose your table
+
+- **CLASSIC:** The original heads-up No Limit Texas Hold'em game against the CPU, with ordinary blinds, stacks, betting, all-ins, showdowns and exact winning-five highlights. Keep playing until one side runs out of chips.
+- **TABLE RUN:** An optional nine-hand, three-stage score chase. Real Hold'em betting and hand evaluation are unchanged. Pots won score points; strong showdown hands earn bigger base multipliers, and streaks reward consistency. You need at least 450 points by hand 3, 1900 by hand 6, and 5200 by hand 9 to clear the run. Your chip stack persists through the run; if the house goes broke, it buys in again at $1600. If you go broke or miss a checkpoint, the run ends. There is no real money.
+
+## Scoring
+
+Winning a pot by fold: `pot x 0.65` base. Winning at showdown: `pot x hand factor` (high card 1.0x, pair 1.35x, two pair 1.8x, trips 2.4x, straight 3.2x, flush 4.0x, full house 5.5x, quads 9.0x, straight flush 18.0x). Consecutive wins add a stacking streak multiplier up to 2.0x. Upgrades multiply that score further. Ties and lost hands award zero points. Scoring uses virtual, in-game chips only and does not change the poker rules or CPU's decisions.
+
+After hands 2, 4, 6 and 8, choose **one of three** randomly offered upgrades. The perk pool rewards pairs, straights, flushes, big pots, showdown wins, Aces, private-card use, bluff wins, being an underdog, and consecutive wins. Once selected, perks stay for the entire run and stack multiplicatively. Upgrades affect points only, never card distribution or hand strength.
 
 ## Controls
-Click the table buttons to choose FOLD / CHECK / CALL / RAISE. Select MIN, HALF POT, POT or MAX, or adjust the proposed raise with - / +. F to fold, C / Space / Enter to call or check, R to raise, arrow keys to adjust your raise. H opens the rules, Space advances after a hand.
 
-Blinds start at $25 / $50 and rise every six hands. Starting stacks are $1600. Press NEW MATCH to reset anytime outside a dealing animation. All gameplay is offline, no betting with real money.
+Click the table buttons to choose FOLD / CHECK / CALL / RAISE. Select MIN, HALF POT, POT, or MAX; adjust the proposed raise with `- / +`. F to fold; C, Space, or Enter to call/check; R to raise; arrow keys to adjust your raise; H to open the rules; Space to advance after a hand. When an upgrade is offered, click its card or press 1, 2, or 3.
+
+Blinds start at $25 / $50 and rise every six hands. Starting stacks are $1600. Poker is strictly single-player and offline, suitable for a browser export; there is no gambling with real money.
 
 ## Winning five-card reveal
-At a showdown, the exact five cards that make the winning poker hand are picked by the hand evaluator. Those five cards rise slightly and get a warm gold outline, while the unused hole and community cards dim. The match sidebar repeats the winning five face-up in a small card strip. On a split pot, use SHOW HOUSE / SHOW YOU to examine either player's equally ranked five-card combination. A fold does not show a made hand because no showdown occurred.
+
+At showdown, the exact five cards that form the winning poker hand rise with a gold outline; unused cards dim. The sidebar repeats those five face-up. In a split pot, use SHOW HOUSE / SHOW YOU to inspect either side's best combination. No winning-five claim is shown on a fold.
+
+## Files
+
+Open `project.godot` in Godot 4.6 and press F5. The main logic is in `scripts/main.gd`; visual draft, run-complete and result overlays are in `scripts/screen_overlay.gd`. All original card art, backs, shaders and audio are preserved.

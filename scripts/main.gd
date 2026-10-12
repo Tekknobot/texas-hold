@@ -25,6 +25,25 @@ const COMMUNITY_X := [243.0, 352.0, 461.0, 570.0, 679.0]
 const CPU_X := [389.0, 497.0]
 const PLAYER_X := [389.0, 497.0]
 
+# TABLE RUN is an optional score-attack mode. Chips, card probabilities,
+# betting, hand evaluation, and the CPU remain true to normal Hold'em.
+const RUN_LENGTH := 9
+const RUN_SAVE := "user://texas_hold_run.cfg"
+const RUN_TARGETS := [450, 1900, 5200]
+const RUN_PERKS := [
+	{"id": "pair", "name": "PAIR CLUB", "value": "1.8X", "detail": "ONE PAIR AND TWO PAIR", "effect": "SCORE MORE WITH PAIRS"},
+	{"id": "straight", "name": "STRAIGHT LINE", "value": "2.0X", "detail": "STRAIGHTS AND STRAIGHT FLUSHES", "effect": "REWARD LONG RUNS"},
+	{"id": "flush", "name": "SUIT SOCIETY", "value": "2.0X", "detail": "FLUSHES AND STRAIGHT FLUSHES", "effect": "REWARD MATCHING SUITS"},
+	{"id": "made", "name": "THE BIG HAND", "value": "2.0X", "detail": "FULL HOUSE OR BETTER", "effect": "REWARD MONSTER HANDS"},
+	{"id": "showdown", "name": "SHOW YOUR HAND", "value": "1.6X", "detail": "WIN AT SHOWDOWN", "effect": "DO NOT RELY ON FOLDS"},
+	{"id": "pot", "name": "POT BUILDER", "value": "1.6X", "detail": "POTS OF $500 OR MORE", "effect": "BIG RISKS, BIG REWARDS"},
+	{"id": "streak", "name": "HOT STREAK", "value": "UP TO 2.2X", "detail": "CONSECUTIVE WINS", "effect": "EACH WIN BUILDS MOMENTUM"},
+	{"id": "ace", "name": "ACE HIGH", "value": "1.5X", "detail": "AN ACE IN YOUR WINNING FIVE", "effect": "REWARD ACE FINISHES"},
+	{"id": "hole", "name": "PERSONAL TOUCH", "value": "1.5X", "detail": "WIN USING A PRIVATE CARD", "effect": "AVOID PLAYING THE BOARD"},
+	{"id": "underdog", "name": "UNDERDOG", "value": "1.8X", "detail": "WIN WITH FEWER CHIPS", "effect": "TURN A DEFICIT INTO POINTS"},
+	{"id": "bluff", "name": "THE BLUFF", "value": "1.8X", "detail": "WIN WHEN THE HOUSE FOLDS", "effect": "FOLD WINS CAN PAY OFF"}
+]
+
 var fx: Node2D
 var background: ColorRect
 var screen_overlay: Node2D
@@ -83,9 +102,22 @@ var selected_amount_hint := ""
 var hotspots: Array = []
 var mouse_at := Vector2(-9999, -9999)
 var last_hover := ""
+var run_mode := false
+var run_score := 0
+var run_animated_score := 0.0
+var run_streak := 0
+var run_perks: Array = []
+var run_choices: Array = []
+var run_last_points := 0
+var run_last_factor := 0.0
+var run_last_text := ""
+var run_hand_underdog := false
+var run_finished_text := ""
+var run_best_score := 0
 
 func _ready() -> void:
 	rng.randomize()
+	_load_run_record()
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_load_art()
 	_load_audio()
@@ -105,6 +137,16 @@ func _ready() -> void:
 	screen_overlay.z_index = 40
 	add_child(screen_overlay)
 	queue_redraw()
+
+func _load_run_record() -> void:
+	var data := ConfigFile.new()
+	if data.load(RUN_SAVE) == OK:
+		run_best_score = maxi(0, int(data.get_value("records", "best_score", 0)))
+
+func _save_run_record() -> void:
+	var data := ConfigFile.new()
+	data.set_value("records", "best_score", run_best_score)
+	data.save(RUN_SAVE)
 
 func _load_art() -> void:
 	var suits := ["Spades", "Hearts", "Diamonds", "Clubs"]
@@ -140,6 +182,10 @@ func _process(delta: float) -> void:
 	mouse_at = get_global_mouse_position()
 	if message_timer > 0.0:
 		message_timer -= delta
+	if absf(run_animated_score - float(run_score)) > 0.5:
+		run_animated_score = move_toward(run_animated_score, float(run_score), maxf(160.0, absf(float(run_score) - run_animated_score) * 3.8) * delta)
+	else:
+		run_animated_score = float(run_score)
 	for card in card_nodes_player:
 		if is_instance_valid(card):
 			var hovered: bool = card.face_up and mouse_at.distance_to(card.position) < 70.0 and not show_help and screen == "playing"
@@ -178,7 +224,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			show_help = true
 			_sound("click")
 		elif screen == "attract" and (key == KEY_SPACE or key == KEY_ENTER):
-			_new_match()
+			_new_match(false)
+		elif screen == "draft":
+			if key >= KEY_1 and key <= KEY_3:
+				_choose_perk(key - KEY_1)
+		elif screen == "run_end" and (key == KEY_SPACE or key == KEY_ENTER):
+			_new_match(true)
 		elif screen == "result" and (key == KEY_SPACE or key == KEY_ENTER):
 			_after_hand()
 		elif _can_act():
@@ -199,8 +250,18 @@ func _click(id: String) -> void:
 		return
 	_sound("click", -17.0)
 	match id:
-		"play", "new_match":
-			_new_match()
+		"play":
+			_new_match(false)
+		"run":
+			_new_match(true)
+		"new_match":
+			_new_match(run_mode)
+		"run_again":
+			_new_match(true)
+		"classic_again":
+			_new_match(false)
+		"perk_0", "perk_1", "perk_2":
+			_choose_perk(int(id.right(1)))
 		"next":
 			_after_hand()
 		"show_five":
@@ -232,10 +293,20 @@ func _click(id: String) -> void:
 		"close_help":
 			show_help = false
 
-func _new_match() -> void:
+func _new_match(use_run: bool = false) -> void:
 	if busy:
 		return
 	show_help = false
+	run_mode = use_run
+	run_score = 0
+	run_animated_score = 0.0
+	run_streak = 0
+	run_perks.clear()
+	run_choices.clear()
+	run_last_points = 0
+	run_last_factor = 0.0
+	run_last_text = ""
+	run_finished_text = ""
 	player_stack = 1600
 	cpu_stack = 1600
 	hand_number = 0
@@ -245,10 +316,124 @@ func _new_match() -> void:
 func _after_hand() -> void:
 	if screen != "result" or busy:
 		return
-	if player_stack == 0 or cpu_stack == 0:
-		_new_match()
+	if run_mode:
+		if player_stack <= 0:
+			_run_finish(false, "OUT OF CHIPS")
+			return
+		if hand_number % 3 == 0:
+			var checkpoint: int = int(hand_number / 3) - 1
+			if run_score < RUN_TARGETS[checkpoint]:
+				_run_finish(false, "TARGET NOT MET")
+				return
+		if hand_number >= RUN_LENGTH:
+			_run_finish(true, "ALL THREE TABLES CLEARED")
+			return
+		# The opponent brings a fresh $1600 stack when busted.
+		# Your bankroll carries forward; this is still real betting.
+		if cpu_stack <= 0:
+			cpu_stack = 1600
+		if hand_number % 2 == 0:
+			_open_perk_draft()
+			return
+	elif player_stack == 0 or cpu_stack == 0:
+		_new_match(false)
+		return
+	_start_hand()
+
+func _run_finish(victory: bool, reason: String) -> void:
+	screen = "run_end"
+	busy = false
+	if run_score > run_best_score:
+		run_best_score = run_score
+		_save_run_record()
+	run_finished_text = "RUN COMPLETE" if victory else "RUN OVER"
+	result_subtitle = reason
+	_sound("win" if victory else "lose", -8.0)
+	fx.spray(Vector2(716, 442), 96 if victory else 24, GOLD if victory else ROSE, 220.0)
+
+func _open_perk_draft() -> void:
+	var available: Array = []
+	for perk in RUN_PERKS:
+		if not run_perks.has(perk["id"]):
+			available.append(perk)
+	available.shuffle()
+	run_choices = available.slice(0, mini(3, available.size()))
+	screen = "draft"
+	_sound("flip", -8.0)
+	fx.spray(Vector2(740, 420), 32, GOLD, 160.0)
+
+func _choose_perk(index: int) -> void:
+	if screen != "draft" or index < 0 or index >= run_choices.size() or busy:
+		return
+	var perk: Dictionary = run_choices[index]
+	run_perks.append(perk["id"])
+	run_choices.clear()
+	_sound("win", -11.0)
+	fx.spray(Vector2(710, 425), 56, GOLD, 190.0)
+	_start_hand()
+
+func run_current_target() -> int:
+	var stage: int = clampi(int((hand_number - 1) / 3), 0, 2)
+	return RUN_TARGETS[stage]
+
+func _run_multiplier(category: int, shown: bool, winning_cards: Array, player_had_less: bool) -> float:
+	var mult := 1.0
+	if run_perks.has("pair") and category >= 1 and category <= 2:
+		mult *= 1.8
+	if run_perks.has("straight") and (category == 4 or category == 8):
+		mult *= 2.0
+	if run_perks.has("flush") and (category == 5 or category == 8):
+		mult *= 2.0
+	if run_perks.has("made") and category >= 6:
+		mult *= 2.0
+	if run_perks.has("showdown") and shown:
+		mult *= 1.6
+	if run_perks.has("pot") and pot >= 500:
+		mult *= 1.6
+	if run_perks.has("streak"):
+		mult *= 1.0 + 0.3 * float(mini(4, maxi(0, run_streak - 1)))
+	if run_perks.has("ace") and shown:
+		for card_id in winning_cards:
+			if Rules.rank_of(int(card_id)) == 14:
+				mult *= 1.5
+				break
+	if run_perks.has("hole") and shown and (winning_cards.has(hole_player[0]) or winning_cards.has(hole_player[1])):
+		mult *= 1.5
+	if run_perks.has("underdog") and player_had_less:
+		mult *= 1.8
+	if run_perks.has("bluff") and not shown:
+		mult *= 1.8
+	return mult
+
+func _run_record_hand(winner: int, shown: bool) -> void:
+	run_last_points = 0
+	run_last_factor = 0.0
+	run_last_text = "NO POINTS THIS HAND"
+	if winner != 0:
+		run_streak = 0
+		return
+	run_streak += 1
+	var category := -1
+	var winning_cards: Array = []
+	var hand_factor := 0.65  # Winning a fold counts, but less than a made hand.
+	if shown:
+		var seven: Array = hole_player.duplicate()
+		seven.append_array(board)
+		var evaluated: Dictionary = Rules.best(seven)
+		category = int(evaluated["category"])
+		winning_cards = evaluated["cards"]
+		var factors := [1.0, 1.35, 1.8, 2.4, 3.2, 4.0, 5.5, 9.0, 18.0]
+		hand_factor = factors[category]
+		run_last_text = str(evaluated["name"])
 	else:
-		_start_hand()
+		run_last_text = "HOUSE FOLDED"
+	# The underdog condition is captured before posting this hand's blinds.
+	var relic_factor := _run_multiplier(category, shown, winning_cards, run_hand_underdog)
+	var streak_factor := 1.0 + 0.20 * float(mini(5, run_streak - 1))
+	run_last_factor = hand_factor * relic_factor * streak_factor
+	run_last_points = maxi(1, int(round(float(pot) * run_last_factor)))
+	run_score += run_last_points
+	fx.spray(Vector2(1019, 340), 50, GOLD, 155.0)
 
 func _clear_cards() -> void:
 	for card in card_nodes_player + card_nodes_cpu + card_nodes_board:
@@ -267,6 +452,7 @@ func _start_hand() -> void:
 	hand_over = false
 	hand_number += 1
 	dealer_is_player = not dealer_is_player
+	run_hand_underdog = player_stack < cpu_stack
 	var blind_level: int = 1 + int((hand_number - 1) / 6)
 	small_blind = 25 * blind_level
 	big_blind = 50 * blind_level
@@ -668,6 +854,8 @@ func _end_hand(winner: int, shown: bool) -> void:
 	hand_over = true
 	busy = false
 	screen = "result"
+	if run_mode:
+		_run_record_hand(winner, shown)
 	if winner == 0:
 		_sound("win", -5.0)
 		fx.spray(Vector2(460, 462), 80, MINT, 240.0)
@@ -701,6 +889,14 @@ func _draw() -> void:
 	_draw_footer()
 	if screen == "attract":
 		_draw_attract()
+	elif screen == "draft":
+		hotspots.clear()
+		for i in range(run_choices.size()):
+			hotspots.append({"id": "perk_%d" % i, "rect": Rect2(189 + i * 350, 321, 322, 256), "enabled": true})
+	elif screen == "run_end":
+		hotspots.clear()
+		hotspots.append({"id": "run_again", "rect": Rect2(376, 588, 324, 60), "enabled": true})
+		hotspots.append({"id": "classic_again", "rect": Rect2(740, 588, 324, 60), "enabled": true})
 	if show_help:
 		hotspots.append({"id": "close_help", "rect": Rect2(555, 679, 330, 48), "enabled": true})
 
@@ -760,8 +956,8 @@ func _draw_ambient() -> void:
 
 func _draw_header() -> void:
 	_text("TEXAS HOLD 'EM", Vector2(35, 44), 31, PALE, 0, true)
-	_text("CLASSIC TABLE  /  SINGLE PLAYER", Vector2(35, 70), 13, MUTED)
-	_text("NO LIMIT  /  HEADS UP", Vector2(35, 102), 13, MINT, 0, true)
+	_text("CARROM COLLECTION  /  SINGLE PLAYER", Vector2(35, 70), 13, MUTED)
+	_text("TABLE RUN  /  SCORE ATTACK" if run_mode and screen != "attract" else "NO LIMIT  /  HEADS UP", Vector2(35, 102), 13, MINT, 0, true)
 
 func _draw_table() -> void:
 	var center := Vector2(445, 453)
@@ -866,8 +1062,8 @@ func _draw_pot() -> void:
 func _draw_footer() -> void:
 	# A fixed sidebar, mirroring CARROM's spacing, typography and hierarchy.
 	_rounded(Rect2(867, 22, 551, 856), PANEL, Color("3c5b51"), 16)
-	_text("THE MATCH", Vector2(900, 59), 14, MINT, 0, true)
-	_text("HEADS UP  /  NO LIMIT", Vector2(900, 88), 19, PALE)
+	_text("TABLE RUN" if run_mode and screen != "attract" else "THE MATCH", Vector2(900, 59), 14, MINT, 0, true)
+	_text("SCORE ATTACK  /  NO LIMIT" if run_mode and screen != "attract" else "HEADS UP  /  NO LIMIT", Vector2(900, 88), 19, PALE)
 	_text("HAND %02d" % hand_number if hand_number > 0 else "TABLE 01", Vector2(1386, 88), 14, MUTED, 2)
 
 	_rounded(Rect2(900, 110, 235, 117), PANEL_ALT, Color(Color("749587"), 0.10), 12)
@@ -880,13 +1076,20 @@ func _draw_footer() -> void:
 	_text("IN THIS ROUND  $%d" % paid_cpu, Vector2(1165, 212), 12, MUTED)
 
 	_rect(Rect2(900, 251, 486, 1), Color(Color("72988a"), 0.48))
-	_text("THE TABLE", Vector2(900, 282), 13, MINT, 0, true)
+	_text("STAGE %d / 3" % mini(3, 1 + int((hand_number - 1) / 3)) if run_mode and screen != "attract" else "THE TABLE", Vector2(900, 282), 13, MINT, 0, true)
 	_text("BLINDS  %d / %d" % [small_blind, big_blind], Vector2(1386, 282), 14, GOLD, 2)
 	_rounded(Rect2(900, 299, 486, 88), PANEL_ALT, Color(Color("709e8b"), 0.13), 10)
 	for j in range(3):
 		_draw_chip(Vector2(931 + j * 16, 344 - j * 3), MINT if j == 0 else (GOLD if j == 1 else ROSE), 15)
 	_text("CURRENT POT", Vector2(1008, 326), 13, MUTED)
 	_accent_text("$%d" % pot, Vector2(1006, 366), 31, PALE, 0, true)
+	if run_mode and screen != "attract":
+		var stage: int = clampi(int((hand_number - 1) / 3), 0, 2)
+		_text("RUN SCORE", Vector2(1181, 323), 12, MINT, 0, true)
+		_accent_text("%d" % int(run_animated_score), Vector2(1180, 357), 27, GOLD, 0, true)
+		_text("TARGET %d  /  HAND %d" % [RUN_TARGETS[stage], (stage + 1) * 3], Vector2(1182, 380), 11, MINT if run_score >= RUN_TARGETS[stage] else PALE)
+	else:
+		_text("WIN THE POT", Vector2(1175, 344), 17, MUTED)
 	var stages := ["PRE-FLOP", "FLOP", "TURN", "RIVER"]
 	for i in range(4):
 		var cx: float = 955.0 + i * 126.0
@@ -896,14 +1099,21 @@ func _draw_footer() -> void:
 		if i < 3:
 			_rect(Rect2(cx + 19, 419, 87, 1), Color(Color("748c81"), 0.23))
 
+	if run_mode and screen != "attract":
+		var names: Array = []
+		for perk in RUN_PERKS:
+			if run_perks.has(perk["id"]):
+				names.append(perk["name"])
+		var last_perk: String = names.back() if not names.is_empty() else "NONE"
+		_text("UPGRADES  %d / 4    LATEST  %s" % [run_perks.size(), last_perk], Vector2(905, 461), 11, GOLD)
 	_rect(Rect2(900, 469, 486, 1), Color(Color("72988a"), 0.28))
 	_text("THE ACTION", Vector2(900, 495), 13, MINT, 0, true)
 	_rounded(Rect2(900, 510, 486, 94), Color("25483f"), Color("3e6759"), 10)
-	var phase_title := "YOUR TURN" if _can_act() else ("HAND COMPLETE" if screen == "result" else ("SHUFFLING CARDS" if busy else "HOUSE TO ACT"))
+	var phase_title := "YOUR TURN" if _can_act() else ("HAND COMPLETE" if screen == "result" else ("PICK AN UPGRADE" if screen == "draft" else ("RUN COMPLETE" if screen == "run_end" else ("SHUFFLING CARDS" if busy else "HOUSE TO ACT"))))
 	if screen == "attract":
 		phase_title = "READY TO DEAL"
 	_text(phase_title, Vector2(918, 545), 19, MINT, 0, true)
-	var detail := "HAND COMPLETE  /  CONTINUE OR START OVER" if screen == "result" else ("START A MATCH TO TAKE YOUR SEAT" if screen == "attract" else cpu_action)
+	var detail := "HAND COMPLETE  /  CONTINUE OR START OVER" if screen == "result" else ("CHOOSE CLASSIC OR TABLE RUN" if screen == "attract" else ("SCORE UPGRADES CHANGE POINTS, NOT THE ODDS" if screen == "draft" else cpu_action))
 	if _can_act():
 		detail = "TO CALL  $%d   /   CHOOSE YOUR ACTION" % mini(maxi(0, current_bet - paid_player), player_stack)
 	_text(detail, Vector2(918, 573), 14, PALE)
@@ -912,14 +1122,21 @@ func _draw_footer() -> void:
 		_draw_play_controls()
 	elif screen == "result":
 		var next_title := "NEW MATCH" if player_stack <= 0 or cpu_stack <= 0 else "NEXT HAND"
+		if run_mode:
+			next_title = "FINISH RUN" if hand_number == RUN_LENGTH else ("CHECK STAGE" if hand_number % 3 == 0 else ("CHOOSE UPGRADE" if hand_number % 2 == 0 else "NEXT HAND"))
 		_button("next", Rect2(900, 624, 486, 54), next_title, MINT, true, true, 20)
 		if showdown_focus >= 0:
 			_draw_showdown_cards()
 		else:
 			_text(result_title + "  /  " + result_subtitle, Vector2(902, 710), 14, GOLD, 0, true)
 	elif screen == "attract":
-		_button("play", Rect2(900, 624, 486, 54), "DEAL ME IN", MINT, true, true, 21)
-		_text("START WITH $1600  /  BLINDS $25 / $50", Vector2(1144, 715), 14, MUTED, 1)
+		_button("play", Rect2(900, 619, 234, 54), "CLASSIC", MINT, true, true, 19)
+		_button("run", Rect2(1146, 619, 240, 54), "TABLE RUN", GOLD, true, true, 19)
+		_text("$1600 START  /  SELECT YOUR MODE", Vector2(1144, 714), 14, MUTED, 1)
+	elif screen == "draft":
+		_text("CHOOSE ONE OF THREE UPGRADES", Vector2(1143, 667), 16, GOLD, 1)
+	elif screen == "run_end":
+		_text("RUN FINISHED  /  PLAY AGAIN", Vector2(1143, 667), 16, GOLD, 1)
 	else:
 		_text("CARDS ARE BEING DEALT", Vector2(1143, 665), 16, MUTED, 1)
 
@@ -927,7 +1144,7 @@ func _draw_footer() -> void:
 	_text("CARD BACK %02d / 05" % (back_index + 1), Vector2(900, 785), 13, MUTED)
 	_button("back", Rect2(1224, 768, 162, 31), "CHANGE BACK", GOLD, false, true, 13)
 	_button("help", Rect2(900, 818, 218, 42), "RULES", PALE, false, true, 15)
-	_button("new_match", Rect2(1128, 818, 258, 42), "NEW MATCH", PALE, false, not busy, 15)
+	_button("new_match", Rect2(1128, 818, 258, 42), "RESTART RUN" if run_mode else "NEW MATCH", PALE, false, not busy and screen != "draft", 15)
 	_text("MOUSE   /   F FOLD   /   C CALL   /   R RAISE", Vector2(35, 866), 13, MUTED)
 
 func _draw_showdown_cards() -> void:
@@ -983,8 +1200,9 @@ func _draw_attract() -> void:
 	# Inset classic tournament welcome card, with the table still visible.
 	_rounded(Rect2(161, 295, 567, 312), Color(Color("19362e"), 0.985), Color(Color("8d986d"), 0.44), 16)
 	_rect(Rect2(188, 319, 513, 1), Color(GOLD.r, GOLD.g, GOLD.b, 0.27))
-	_text("THE CLASSIC GAME", Vector2(445, 360), 14, MINT, 1, true)
-	_text("TEXAS HOLD 'EM", Vector2(445, 424), 44, PALE, 1, true)
-	_text("A game of cards, odds and nerve.", Vector2(445, 458), 18, MUTED, 1)
-	_text("PLAY THE HOUSE  /  NO LIMIT HOLD 'EM", Vector2(445, 496), 14, GOLD, 1)
-	_button("play", Rect2(297, 525, 296, 53), "DEAL ME IN", MINT, true, true, 19)
+	_text("THE CLASSIC GAME  /  AN ARCADE RUN", Vector2(445, 351), 14, MINT, 1, true)
+	_text("TEXAS HOLD 'EM", Vector2(445, 409), 44, PALE, 1, true)
+	_text("Cards, odds, and nerve.", Vector2(445, 448), 18, MUTED, 1)
+	_text("PLAY CLASSIC OR CHASE A NINE-HAND SCORE", Vector2(445, 486), 14, GOLD, 1)
+	_button("play", Rect2(196, 525, 244, 53), "CLASSIC", MINT, true, true, 19)
+	_button("run", Rect2(449, 525, 244, 53), "TABLE RUN", GOLD, true, true, 19)
