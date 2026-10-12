@@ -87,16 +87,27 @@ static func _score_five(cards: Array) -> Dictionary:
 
 static func best(cards: Array) -> Dictionary:
 	if cards.size() < 5:
-		return {"value": -1, "category": -1, "name": "WAITING FOR BOARD", "kickers": []}
-	var best_score := {"value": -1, "category": -1, "name": "", "kickers": []}
+		return {"value": -1, "category": -1, "name": "WAITING FOR BOARD", "kickers": [], "cards": []}
+	var best_score := {"value": -1, "category": -1, "name": "", "kickers": [], "cards": []}
+	var most_board_cards := -1
 	for a in range(cards.size() - 4):
 		for b in range(a + 1, cards.size() - 3):
 			for c in range(b + 1, cards.size() - 2):
 				for d in range(c + 1, cards.size() - 1):
 					for e in range(d + 1, cards.size()):
-						var score: Dictionary = _score_five([cards[a], cards[b], cards[c], cards[d], cards[e]])
-						if int(score["value"]) > int(best_score["value"]):
+						var indices := [a, b, c, d, e]
+						var five: Array = [cards[a], cards[b], cards[c], cards[d], cards[e]]
+						var score: Dictionary = _score_five(five)
+						# If two combinations are equivalent, prefer shared cards.
+						# This makes board-only winning hands easier to recognize.
+						var board_count := 0
+						for index in indices:
+							if index >= 2:
+								board_count += 1
+						if int(score["value"]) > int(best_score["value"]) or (int(score["value"]) == int(best_score["value"]) and board_count > most_board_cards):
 							best_score = score
+							best_score["cards"] = five
+							most_board_cards = board_count
 	return best_score
 
 static func preflop_label(two_cards: Array) -> String:

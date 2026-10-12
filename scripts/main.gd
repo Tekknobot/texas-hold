@@ -72,6 +72,11 @@ var cpu_action := "WAITING"
 var result_title := ""
 var result_subtitle := ""
 var result_detail := ""
+# A showdown records the exact five cards for each evaluated hand.
+# The focused hand is the winner (or the selected side of a split pot).
+var showdown_hands: Array = [[], []]
+var showdown_focus := -1
+var showdown_is_split := false
 var message_timer := 0.0
 var table_clock := 0.0
 var selected_amount_hint := ""
@@ -137,12 +142,12 @@ func _process(delta: float) -> void:
 		message_timer -= delta
 	for card in card_nodes_player:
 		if is_instance_valid(card):
-			var hovered: bool = card.face_up and mouse_at.distance_to(card.position) < 70.0 and not show_help
+			var hovered: bool = card.face_up and mouse_at.distance_to(card.position) < 70.0 and not show_help and screen == "playing"
 			card.hover_target = 1.0 if hovered else 0.0
 			card.tilt = clampf((mouse_at.x - card.position.x) * 0.0006, -0.07, 0.07) if hovered else 0.0
 	for card in card_nodes_board:
 		if is_instance_valid(card):
-			var hovered: bool = mouse_at.distance_to(card.position) < 55.0 and not show_help
+			var hovered: bool = mouse_at.distance_to(card.position) < 55.0 and not show_help and screen == "playing" and screen == "playing"
 			card.hover_target = 0.65 if hovered else 0.0
 			card.tilt = clampf((mouse_at.x - card.position.x) * 0.0004, -0.05, 0.05) if hovered else 0.0
 	var hovered_id := ""
@@ -198,6 +203,11 @@ func _click(id: String) -> void:
 			_new_match()
 		"next":
 			_after_hand()
+		"show_five":
+			if screen == "result" and showdown_is_split:
+				showdown_focus = 1 - showdown_focus
+				_apply_showdown_selection()
+				_sound("flip", -17.0)
 		"fold", "call", "raise":
 			_player_move(id)
 		"min":
@@ -275,6 +285,9 @@ func _start_hand() -> void:
 	board.clear()
 	result_title = ""
 	result_detail = ""
+	showdown_hands = [[], []]
+	showdown_focus = -1
+	showdown_is_split = false
 	callout = "SHUFFLING THE DECK"
 	cpu_action = "POSTING BLINDS"
 	deck.clear()
@@ -605,6 +618,9 @@ func _showdown() -> void:
 		winner = 0
 	elif cpu_score["value"] > player_score["value"]:
 		winner = 1
+	showdown_hands = [player_score["cards"], cpu_score["cards"]]
+	showdown_is_split = winner == -1
+	showdown_focus = 0 if showdown_is_split else winner
 	if winner == 0:
 		result_title = "YOU WIN"
 		result_subtitle = player_score["name"]
@@ -625,6 +641,29 @@ func _showdown() -> void:
 		cpu_stack += half + (int(pot % 2) if dealer_is_player else 0)
 	_end_hand(winner, true)
 
+func _apply_showdown_selection() -> void:
+	# A winning five is a combination of two private and five shared cards.
+	# Do not highlight both hole cards by default: either, both, or neither
+	# might be used. Apply exactly five selections across the table.
+	if showdown_focus < 0 or showdown_focus >= showdown_hands.size():
+		return
+	var chosen: Array = showdown_hands[showdown_focus]
+	for i in range(card_nodes_player.size()):
+		var card = card_nodes_player[i]
+		if is_instance_valid(card):
+			card.is_winner = showdown_focus == 0 and chosen.has(hole_player[i])
+			card.dimmed = not card.is_winner
+	for i in range(card_nodes_cpu.size()):
+		var card = card_nodes_cpu[i]
+		if is_instance_valid(card):
+			card.is_winner = showdown_focus == 1 and chosen.has(hole_cpu[i])
+			card.dimmed = not card.is_winner
+	for i in range(card_nodes_board.size()):
+		var card = card_nodes_board[i]
+		if is_instance_valid(card):
+			card.is_winner = chosen.has(board[i])
+			card.dimmed = not card.is_winner
+
 func _end_hand(winner: int, shown: bool) -> void:
 	hand_over = true
 	busy = false
@@ -638,13 +677,10 @@ func _end_hand(winner: int, shown: bool) -> void:
 	else:
 		_sound("check", -8.0)
 		fx.spray(Vector2(460, 462), 34, GOLD, 140.0)
-	for card in card_nodes_player:
-		if is_instance_valid(card):
-			card.is_winner = winner == 0 or winner == -1
-			card.dimmed = winner == 1
-	for card in card_nodes_cpu:
-		if is_instance_valid(card):
-			card.is_winner = shown and (winner == 1 or winner == -1)
+	if shown:
+		_apply_showdown_selection()
+	# A fold awards the pot without a five-card showdown. In that case
+	# no cards are labelled winning; the unshown cards stay unaltered.
 	if player_stack <= 0:
 		result_detail += "  /  YOU ARE OUT"
 	elif cpu_stack <= 0:
@@ -813,6 +849,10 @@ func _draw_community() -> void:
 		if i >= board.size():
 			_text("%02d" % (i + 1), Vector2(COMMUNITY_X[i], 467), 19, Color(Color("c3dbcb"), 0.23), 1)
 	_draw_pot()
+	if screen == "result" and showdown_focus >= 0:
+		var marker := "WINNING FIVE" if not showdown_is_split else ("YOUR BEST FIVE" if showdown_focus == 0 else "HOUSE BEST FIVE")
+		_rounded(Rect2(348, 541, 195, 30), Color("19372f"), Color(GOLD.r, GOLD.g, GOLD.b, 0.65), 8)
+		_text(marker, Vector2(445, 562), 13, GOLD, 1, true)
 	if screen == "playing" and message_timer > 0.0 and not busy:
 		_text(callout, Vector2(446, 576), 16, GOLD, 1, true)
 
@@ -873,7 +913,10 @@ func _draw_footer() -> void:
 	elif screen == "result":
 		var next_title := "NEW MATCH" if player_stack <= 0 or cpu_stack <= 0 else "NEXT HAND"
 		_button("next", Rect2(900, 624, 486, 54), next_title, MINT, true, true, 20)
-		_text(result_title + "  /  " + result_subtitle, Vector2(902, 710), 14, GOLD, 0, true)
+		if showdown_focus >= 0:
+			_draw_showdown_cards()
+		else:
+			_text(result_title + "  /  " + result_subtitle, Vector2(902, 710), 14, GOLD, 0, true)
 	elif screen == "attract":
 		_button("play", Rect2(900, 624, 486, 54), "DEAL ME IN", MINT, true, true, 21)
 		_text("START WITH $1600  /  BLINDS $25 / $50", Vector2(1144, 715), 14, MUTED, 1)
@@ -886,6 +929,24 @@ func _draw_footer() -> void:
 	_button("help", Rect2(900, 818, 218, 42), "RULES", PALE, false, true, 15)
 	_button("new_match", Rect2(1128, 818, 258, 42), "NEW MATCH", PALE, false, not busy, 15)
 	_text("MOUSE   /   F FOLD   /   C CALL   /   R RAISE", Vector2(35, 866), 13, MUTED)
+
+func _draw_showdown_cards() -> void:
+	# A miniature proof of the exact winning combination on the sidebar.
+	# The identical five sprites are outlined on the felt; all others dim.
+	var selected: Array = showdown_hands[showdown_focus]
+	if selected.size() != 5:
+		return
+	if showdown_is_split:
+		_text("TIED HANDS", Vector2(900, 703), 13, GOLD, 0, true)
+		_button("show_five", Rect2(900, 714, 202, 37), "SHOW HOUSE" if showdown_focus == 0 else "SHOW YOU", GOLD, false, true, 13)
+	else:
+		_text("WINNING FIVE", Vector2(900, 708), 14, GOLD, 0, true)
+		_text("YOUR HAND" if showdown_focus == 0 else "HOUSE HAND", Vector2(900, 734), 13, MINT if showdown_focus == 0 else GOLD)
+	for i in range(5):
+		var card_id: int = selected[i]
+		var thumb := Rect2(1141.0 + i * 48.0, 694, 34, 47)
+		_rect(thumb.grow(2.0), Color("1c3a30"), Color(GOLD.r, GOLD.g, GOLD.b, 0.64), 1.0)
+		draw_texture_rect(face_textures[card_id], thumb, false)
 
 func _draw_play_controls() -> void:
 	var owed: int = maxi(0, current_bet - paid_player)

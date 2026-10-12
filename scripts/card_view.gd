@@ -44,21 +44,27 @@ func _draw() -> void:
 	var h := 52.0
 	var cosine := cos(flip_progress * PI)
 	var width_scale: float = maxf(absf(cosine), 0.035)
-	var shrink := 1.0 + hover_amount * 0.07 + (0.045 * sin(clock * 3.5) if is_winner else 0.0)
-	var y_lift := -hover_amount * 9.0 - (1.0 - width_scale) * 3.0
+	var shrink := 1.0 + hover_amount * 0.07 + (0.018 + 0.015 * sin(clock * 3.5) if is_winner else 0.0)
+	var y_lift := -hover_amount * 9.0 - (1.0 - width_scale) * 3.0 - (7.0 if is_winner else 0.0)
 	var shear_angle := tilt + sin(clock * 0.65 + position.x) * 0.002
 	var tex: Texture2D = face_texture if flip_progress >= 0.5 else back_texture
-	var opacity := 0.42 if dimmed else 1.0
-	var base_color := Color(1.0, 1.0, 1.0, opacity)
-	var outline := Color("7bdac2") if is_winner else Color("e8bf7e")
-	var glow_alpha := 0.055 + hover_amount * 0.20 + reveal_glow * 0.30 + (0.17 if is_winner else 0.0)
+	var base_color := Color(0.63, 0.70, 0.64, 0.66) if dimmed else Color.WHITE
+	var outline := Color("e8bf7e") if is_winner else Color("7bdac2")
+	var glow_alpha := (0.008 if dimmed else 0.055 + hover_amount * 0.20 + reveal_glow * 0.30 + (0.32 if is_winner else 0.0))
 	draw_set_transform(Vector2(0.0, y_lift), shear_angle, Vector2(width_scale * card_scale * shrink, card_scale * (1.0 + hover_amount * 0.02)))
 	var rect := Rect2(-w * 0.5, -h * 0.5, w, h)
 	for i in range(3, 0, -1):
 		var r: float = float(i) * 2.5
 		draw_rect(rect.grow(r), Color(outline.r, outline.g, outline.b, glow_alpha * 0.25), true)
 	draw_rect(rect.grow(0.65), Color(0.11, 0.20, 0.17, 0.90), true)
+	if is_winner:
+		draw_rect(rect.grow(2.2), Color(0.91, 0.75, 0.49, 0.92), false, 1.4)
 	draw_texture_rect(tex, rect, false, base_color)
+	if dimmed:
+		# Darken cards that do not belong to the winning five.
+		draw_rect(rect, Color(0.06, 0.17, 0.13, 0.51), true)
+	elif is_winner:
+		draw_rect(rect.grow(0.7), Color(1.0, 0.92, 0.71, 0.78), false, 0.85)
 	if flip_progress > 0.05 and flip_progress < 0.95:
 		var shine := 1.0 - width_scale
 		draw_rect(Rect2(-1.5, -h * 0.5, 3.0, h), Color(0.86, 1.0, 0.94, shine * 0.65), true)
