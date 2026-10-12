@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://cldsn4bibxcds"]
+
+[ext_resource type="Script" uid="uid://ddmdxolyvhpvg" path="res://scripts/main.gd" id="1_main"]
+
+[node name="TexasHoldEm" type="Node2D" unique_id=584994766]
+texture_filter = 1
+script = ExtResource("1_main")
