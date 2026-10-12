@@ -126,6 +126,13 @@ var count_upgrade_factor := 1.0
 var count_streak_factor := 1.0
 var count_pot_value := 0
 var run_last_triggered: Array[String] = []
+# Each VISIBLE jump in the payout number has one matching tick. Quantizing
+# the visual readout prevents dozens of sounds per frame with large pots.
+const TALLY_STEP_FRACTION := 0.86 # Reserve the end of each phase for its landing chime.
+var tally_last_value := 0
+var tally_last_step := 0
+var tally_voices: Array = []
+var tally_voice_index := 0
 
 func _ready() -> void:
 	rng.randomize()
@@ -170,13 +177,39 @@ func _load_art() -> void:
 		backs.append(load("res://Sprites/KIN's_Playing_Cards/Back_%d.png" % i))
 
 func _load_audio() -> void:
-	for name in ["deal", "flip", "chip", "check", "click", "win", "lose", "raise"]:
+	for name in ["deal", "flip", "chip", "check", "click", "win", "lose", "raise", "tally_tick", "tally_land"]:
 		audio[name] = load("res://audio/%s.wav" % name)
 	for i in range(9):
 		var voice := AudioStreamPlayer.new()
 		voice.volume_db = -12.0
 		voice_pool.append(voice)
 		add_child(voice)
+	# Use separate short-lived voices for the tally, so normal chips / win
+	# sounds aren't cut off by the fast melodic counting sequence.
+	for i in range(6):
+		var voice := AudioStreamPlayer.new()
+		voice.volume_db = -15.0
+		tally_voices.append(voice)
+		add_child(voice)
+
+func _play_tally_sound(name: String, pitch: float, volume: float) -> void:
+	if not audio.has(name):
+		return
+	var voice: AudioStreamPlayer = tally_voices[tally_voice_index]
+	tally_voice_index = (tally_voice_index + 1) % tally_voices.size()
+	voice.stop()
+	voice.stream = audio[name]
+	voice.pitch_scale = pitch
+	voice.volume_db = volume
+	voice.play()
+
+func _tally_tick(step: int) -> void:
+	# A simple upward scale, brighter as the displayed score grows.
+	var notes: Array[int] = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19]
+	var note: int = notes[clampi(step - 1, 0, notes.size() - 1)] + count_phase
+	var pitch: float = 0.78 * pow(2.0, float(note) / 12.0)
+	_play_tally_sound("tally_tick", pitch, -17.0 if count_phase < 4 else -15.0)
+	count_flash = maxf(count_flash, 0.42)
 
 func _sound(name: String, volume_db: float = -10.0) -> void:
 	if not audio.has(name):
@@ -197,7 +230,7 @@ func _process(delta: float) -> void:
 	if count_active:
 		_update_count(delta)
 	if count_active and run_mode and count_winner == 0:
-		var reveal_progress: float = _count_progress() if count_phase == 4 else 0.0
+		var reveal_progress: float = _tally_number_progress() if count_phase == 4 else 0.0
 		run_animated_score = float(run_score - run_last_points) + float(run_last_points) * reveal_progress
 	elif not count_active:
 		run_animated_score = move_toward(run_animated_score, float(run_score), maxf(160.0, absf(float(run_score) - run_animated_score) * 3.8) * delta)
@@ -331,6 +364,8 @@ func _new_match(use_run: bool = false) -> void:
 	count_active = false
 	count_phase = 0
 	count_elapsed = 0.0
+	tally_last_value = 0
+	tally_last_step = 0
 	player_stack = 1600
 	cpu_stack = 1600
 	hand_number = 0
@@ -926,6 +961,8 @@ func _begin_count(winner: int) -> void:
 	count_elapsed = 0.0
 	count_flash = 1.0
 	count_active = true
+	tally_last_step = 0
+	tally_last_value = _count_value()
 	if run_mode and winner == 0:
 		run_animated_score = float(run_score - run_last_points)
 	_sound("chip", -13.0)
@@ -940,9 +977,33 @@ func _count_progress() -> float:
 	var t: float = clampf(count_elapsed / _count_duration(), 0.0, 1.0)
 	return 1.0 - pow(1.0 - t, 3.0)
 
+func _tally_step_count() -> int:
+	# The final score has a slightly longer, faster cascade.
+	return 12 if run_mode and count_winner == 0 and count_phase == 4 else 8
+
+func _tally_step_index() -> int:
+	# Changes at a controlled rhythm, not at frame rate. Audio and displayed
+	# digits read the same index, so every visible numerical jump gets a tick.
+	var active_time: float = _count_duration() * TALLY_STEP_FRACTION
+	return clampi(int(floor(count_elapsed / active_time * float(_tally_step_count()))), 0, _tally_step_count())
+
+func _tally_number_progress() -> float:
+	var fraction: float = float(_tally_step_index()) / float(_tally_step_count())
+	# Smoothstep moves the payoff most during the center of the cascade.
+	return fraction * fraction * (3.0 - 2.0 * fraction)
+
 func _update_count(delta: float) -> void:
 	count_elapsed += delta
-	count_flash = maxf(0.0, count_flash - delta * 2.3)
+	count_flash = maxf(0.0, count_flash - delta * 3.0)
+	var step: int = _tally_step_index()
+	if step != tally_last_step:
+		var new_value: int = _count_value()
+		# A 1.0X multiplier or a very small pot may not move the number;
+		# don't play phantom ticks when no digits actually change.
+		if new_value != tally_last_value:
+			_tally_tick(step)
+		tally_last_value = new_value
+		tally_last_step = step
 	if count_elapsed < _count_duration():
 		return
 	count_elapsed -= _count_duration()
@@ -952,7 +1013,10 @@ func _update_count(delta: float) -> void:
 	if count_phase > max_phase:
 		_finish_count()
 		return
-	_sound("chip", -15.0 if count_phase < max_phase else -9.0)
+	# A per-stage landing accent, distinct from the repeated number ticks.
+	_play_tally_sound("tally_land", 0.92 + float(count_phase) * 0.075, -16.0)
+	tally_last_step = 0
+	tally_last_value = _count_value()
 	if count_phase == max_phase:
 		fx.spray(Vector2(1160, 603), 38 if count_winner == 0 else 13, GOLD if count_winner == 0 else ROSE, 132.0)
 	else:
@@ -964,10 +1028,11 @@ func _finish_count() -> void:
 	count_active = false
 	run_animated_score = float(run_score)
 	count_flash = 0.0
+	_play_tally_sound("tally_land", 1.22 if count_winner == 0 else 0.89, -10.5)
 	fx.spray(Vector2(1143, 590), 22 if count_winner == 0 else 8, GOLD if count_winner == 0 else MINT, 104.0)
 
 func _count_value() -> int:
-	var t: float = _count_progress()
+	var t: float = _tally_number_progress()
 	if not run_mode or count_winner != 0:
 		return int(round(float(count_pot_value) * t)) if count_phase == 0 else (0 if run_mode else count_pot_value)
 	var original: float = float(count_pot_value)
